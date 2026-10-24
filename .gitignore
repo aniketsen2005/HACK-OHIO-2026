@@ -1,0 +1,25 @@
+# Compiled Java files (everyone builds their own!)
+*.class
+bin/
+out/
+target/
+build/
+
+# VSCode personal settings (each person has their own)
+.vscode/
+
+# Other IDEs
+.idea/
+*.iml
+
+# Operating system junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# SECRETS - never push these to GitHub!
+*serviceAccount*.json
+*firebase-adminsdk*.json
+.env
