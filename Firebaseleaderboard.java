@@ -2,21 +2,24 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * FirebaseLeaderboard.java
  * ----------------------------------------------------------
- * Sends a team's final score to the Firebase Realtime Database.
+ * Saves scores to Firebase and reads them back for the leaderboard screen.
  *
  * WHY THIS IS SIMPLE: Instead of installing the big Firebase Java SDK (which
  * needs Maven/Gradle and a secret key file), we talk to Firebase over plain
  * HTTPS using Java's built-in HttpClient. Nothing to download!
  *
- * ONE-TIME SETUP (one teammate does this, then pastes the URL below):
- *   1. Go to https://console.firebase.google.com  ->  Add project
+ * ONE-TIME SETUP:
+ *   1. Go to https://console.firebase.google.com  ->  Create a project
  *   2. Left menu: Build -> Realtime Database -> Create Database
- *   3. Choose "Start in test mode"  (or set Rules to the text below)
- *         { "rules": { ".read": true, ".write": true } }
+ *   3. Pick a United States location and "Start in test mode"
  *   4. Copy the database URL shown at the top of the Data tab
  *      (looks like https://something-default-rtdb.firebaseio.com)
  *      and paste it into DATABASE_URL below.
@@ -26,7 +29,26 @@ import java.net.http.HttpResponse;
 public class FirebaseLeaderboard {
 
     // TODO: PASTE YOUR FIREBASE DATABASE URL HERE (no slash at the end!)
-    private static final String DATABASE_URL = "https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com";
+    private static final String DATABASE_URL = "https://osu-exam-scavenger-hunt-default-rtdb.firebaseio.com";
+
+    // ===================================================================
+    // Entry: one row of the leaderboard (a team name, their major, their score)
+    // ===================================================================
+    public static class Entry {
+        public final String teamName;
+        public final String major;
+        public final int score;
+
+        public Entry(String teamName, String major, int score) {
+            this.teamName = teamName;
+            this.major = major;
+            this.score = score;
+        }
+    }
+
+    // ===================================================================
+    // SAVE a score
+    // ===================================================================
 
     /**
      * Saves one score to the leaderboard.
@@ -68,6 +90,90 @@ public class FirebaseLeaderboard {
             System.out.println("Could not reach Firebase: " + e.getMessage());
             return false;
         }
+    }
+
+    // ===================================================================
+    // READ the top scores
+    // ===================================================================
+
+    /**
+     * Downloads every saved score, sorts them from highest to lowest,
+     * and returns the best 'maxEntries' of them.
+     *
+     * Returns an EMPTY list if nobody has played yet.
+     * Returns null if something went wrong (so the screen can show an error).
+     */
+    public static List<Entry> getTopScores(int maxEntries) {
+        try {
+            // 1. Ask Firebase for everything in the "leaderboard" folder
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(DATABASE_URL + "/leaderboard.json"))
+                    .GET()
+                    .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                System.out.println("Firebase error " + response.statusCode() + ": " + response.body());
+                return null;
+            }
+
+            // 2. Firebase answers with JSON text that looks like:
+            //    {"-Abc123":{"major":"CS","score":742,"teamName":"Buckeyes","timestamp":1700}, "-Def456":{...}}
+            //    (or just the word null if the folder is empty).
+            //    Instead of installing a JSON library, we hunt for each { ... } chunk
+            //    with a "regular expression" and pull the 3 fields out of each chunk.
+            String body = response.body();
+            List<Entry> entries = new ArrayList<>();
+            Matcher chunkFinder = Pattern.compile("\\{[^{}]*\\}").matcher(body);
+
+            while (chunkFinder.find()) {
+                String chunk = chunkFinder.group();
+                String team = readText(chunk, "teamName");
+                String major = readText(chunk, "major");
+                int score = readNumber(chunk, "score");
+                entries.add(new Entry(team, major, score));
+            }
+
+            // 3. Sort so the highest score comes first
+            entries.sort((a, b) -> Integer.compare(b.score, a.score));
+
+            // 4. Keep only the top few
+            if (entries.size() > maxEntries) {
+                entries = new ArrayList<>(entries.subList(0, maxEntries));
+            }
+            return entries;
+
+        } catch (Exception e) {
+            System.out.println("Could not reach Firebase: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ===================================================================
+    // Small helper methods
+    // ===================================================================
+
+    /** Pulls a text value out of a JSON chunk, like "teamName":"Buckeyes" -> Buckeyes */
+    private static String readText(String chunk, String key) {
+        Pattern pattern = Pattern.compile("\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+        Matcher matcher = pattern.matcher(chunk);
+        if (matcher.find()) {
+            // Undo the escaping we did when saving (\" becomes " and \\ becomes \)
+            return matcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\");
+        }
+        return "?";
+    }
+
+    /** Pulls a whole number out of a JSON chunk, like "score":742 -> 742 */
+    private static int readNumber(String chunk, String key) {
+        Pattern pattern = Pattern.compile("\"" + key + "\"\\s*:\\s*(-?\\d+)");
+        Matcher matcher = pattern.matcher(chunk);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        return 0;
     }
 
     /**

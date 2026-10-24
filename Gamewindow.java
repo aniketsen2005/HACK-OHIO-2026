@@ -13,18 +13,17 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.GridLayout;
-import java.awt.Point;
 import java.util.HashMap;
 
 /**
  * GameWindow.java
  * ----------------------------------------------------------
  * The visual part of the game. It shows:
- *   - a countdown timer (1 hour)
+ *   - a countdown timer (1 hour until the exam!)
  *   - the current riddle
  *   - a simple 2D "map" with one clickable button per landmark
  *
- * It uses GameLogic.java for the rules/score and
+ * It uses GameLogic.java for the rules/score/landmarks and
  * FirebaseLeaderboard.java to save the final score.
  *
  * TO RUN: open this file in VSCode and click "Run" above the main method.
@@ -47,36 +46,31 @@ public class GameWindow extends JFrame {
     private MapPanel mapPanel;
     private HashMap<String, JButton> landmarkButtons = new HashMap<>();
 
-    // ---- Where each landmark sits on the map (x, y in pixels) ----
-    // TEAMMATES: change these numbers to move the buttons around!
-    private HashMap<String, Point> landmarkPositions = new HashMap<>();
-
     // The countdown timer. It "ticks" once per second.
     // (javax.swing.Timer is the beginner-friendly, safe way to do a timer in Swing.)
     private javax.swing.Timer countdownTimer;
 
     /**
-     * Constructor: builds the whole window.
+     * Constructor: builds the whole window (but does NOT start the clock yet).
      */
     public GameWindow(String teamName, String major) {
         this.teamName = teamName;
         this.major = major;
-        this.logic = new GameLogic();   // starts a new game with a random spawn
+        this.logic = new GameLogic();   // starts a new game with a random spawn + random exam spot
 
-        setupPositions();
         buildScreen();
-        startTimer();
         updateScreen();
         statusLabel.setText("You spawned at: " + logic.getCurrentLocation() + ". Good luck!");
     }
 
-    /** Decides where each landmark button goes on the map. */
-    private void setupPositions() {
-        landmarkPositions.put("Lane Ave Structure", new Point(350, 70));
-        landmarkPositions.put("The James",          new Point(120, 210));
-        landmarkPositions.put("Thompson Library",   new Point(350, 210));
-        landmarkPositions.put("Ohio Union",         new Point(350, 350));
-        landmarkPositions.put("RPAC",               new Point(590, 370));
+    /**
+     * Called AFTER the window is visible. Shows the story pop-up,
+     * and only starts the clock once the player clicks OK.
+     */
+    public void begin() {
+        JOptionPane.showMessageDialog(this, logic.getStoryIntro(),
+                "Your exam is in 1 hour!", JOptionPane.INFORMATION_MESSAGE);
+        startTimer();
     }
 
     /** Creates all the labels, boxes, and buttons and puts them in the window. */
@@ -90,7 +84,7 @@ public class GameWindow extends JFrame {
         teamLabel = new JLabel("", SwingConstants.CENTER);
         timerLabel = new JLabel("", SwingConstants.CENTER);
         scoreLabel = new JLabel("", SwingConstants.CENTER);
-        timerLabel.setFont(new Font("Arial", Font.BOLD, 28));
+        timerLabel.setFont(new Font("Arial", Font.BOLD, 26));
         teamLabel.setFont(new Font("Arial", Font.PLAIN, 16));
         scoreLabel.setFont(new Font("Arial", Font.PLAIN, 16));
         topPanel.add(teamLabel);
@@ -101,18 +95,20 @@ public class GameWindow extends JFrame {
         // ----- CENTER: the clickable map -----
         mapPanel = new MapPanel();
         mapPanel.setLayout(null);   // null layout lets us place buttons at exact x,y spots
-        mapPanel.setPreferredSize(new Dimension(720, 440));
+        mapPanel.setPreferredSize(new Dimension(920, 520));
 
-        for (String name : GameLogic.LANDMARKS) {
-            JButton button = new JButton(name);
-            Point p = landmarkPositions.get(name);
+        // Make one button for EVERY landmark listed in GameLogic.
+        // (Add a landmark in GameLogic and it shows up here automatically!)
+        for (GameLogic.Landmark landmark : GameLogic.LANDMARKS) {
+            JButton button = new JButton(landmark.name);
+            button.setFont(new Font("Arial", Font.PLAIN, 12));
             // setBounds(x, y, width, height). We subtract so the button is centered on the point.
-            button.setBounds(p.x - 70, p.y - 20, 140, 40);
+            button.setBounds(landmark.x - 80, landmark.y - 20, 160, 40);
 
             // What happens when this button is clicked:
-            button.addActionListener(e -> handleGuess(name));
+            button.addActionListener(e -> handleGuess(landmark.name));
 
-            landmarkButtons.put(name, button);
+            landmarkButtons.put(landmark.name, button);
             mapPanel.add(button);
         }
         add(mapPanel, BorderLayout.CENTER);
@@ -125,6 +121,11 @@ public class GameWindow extends JFrame {
         riddleBox.setWrapStyleWord(true);
         riddleBox.setFont(new Font("Arial", Font.PLAIN, 18));
         bottomPanel.add(new JScrollPane(riddleBox), BorderLayout.CENTER);
+
+        // A button that opens the leaderboard window at any time
+        JButton leaderboardButton = new JButton("View Leaderboard");
+        leaderboardButton.addActionListener(e -> LeaderboardWindow.showWindow());
+        bottomPanel.add(leaderboardButton, BorderLayout.EAST);
 
         statusLabel = new JLabel(" ", SwingConstants.CENTER);
         statusLabel.setFont(new Font("Arial", Font.ITALIC, 14));
@@ -172,9 +173,9 @@ public class GameWindow extends JFrame {
     /** Refreshes all the text on screen so it matches the current game state. */
     private void updateScreen() {
         // Timer display as MM:SS
-        int minutes = secondsRemaining / 60;
-        int seconds = secondsRemaining % 60;
-        timerLabel.setText(String.format("%02d:%02d", minutes, seconds));
+        int minutes = Math.max(secondsRemaining, 0) / 60;
+        int seconds = Math.max(secondsRemaining, 0) % 60;
+        timerLabel.setText(String.format("Exam in %02d:%02d", minutes, seconds));
 
         // Turn the timer red in the last 5 minutes
         if (secondsRemaining <= 300) {
@@ -188,21 +189,25 @@ public class GameWindow extends JFrame {
                 + "  |  Wrong: " + logic.getWrongGuesses());
 
         if (!gameOver) {
-            riddleBox.setText("RIDDLE " + logic.getRiddleNumber() + " of " + logic.getTotalRiddles()
-                    + ":\n" + logic.getCurrentRiddle());
+            // The last riddle gets a special heading, since it leads to the exam
+            String heading = "RIDDLE " + logic.getRiddleNumber() + " of " + logic.getTotalRiddles();
+            if (logic.isFinalClue()) {
+                heading = heading + " (FINAL - THIS LEADS TO YOUR EXAM!)";
+            }
+            riddleBox.setText(heading + ":\n" + logic.getCurrentRiddle());
         }
 
         mapPanel.repaint();   // redraw the map so the "YOU" marker moves
     }
 
-    /** Player solved the last riddle in time! */
+    /** Player reached the exam building in time! */
     private void winGame() {
         gameOver = true;
         countdownTimer.stop();
         disableButtons();
 
         final int finalScore = logic.calculateScore(secondsRemaining);
-        riddleBox.setText("YOU DID IT! Final destination reached.\nFinal score: " + finalScore);
+        riddleBox.setText("YOU MADE IT TO YOUR EXAM ON TIME!\nFinal score: " + finalScore);
         statusLabel.setText("Saving your score to the leaderboard...");
 
         // Sending data over the internet can be slow, so we do it on a separate thread.
@@ -216,26 +221,27 @@ public class GameWindow extends JFrame {
                 if (saved) {
                     statusLabel.setText("Score saved to the global leaderboard!");
                     JOptionPane.showMessageDialog(this,
-                            "You win, " + teamName + "!\nFinal score: " + finalScore
+                            "You made it to your exam, " + teamName + "!\nFinal score: " + finalScore
                                     + "\nSaved to the leaderboard.");
+                    LeaderboardWindow.showWindow();   // show the leaderboard right after the win
                 } else {
                     statusLabel.setText("Could not save score (check internet / Firebase URL).");
                     JOptionPane.showMessageDialog(this,
-                            "You win, " + teamName + "!\nFinal score: " + finalScore
+                            "You made it to your exam, " + teamName + "!\nFinal score: " + finalScore
                                     + "\nBut the score could NOT be saved. Check the console for details.");
                 }
             });
         }).start();
     }
 
-    /** Timer hit zero before the player finished. */
+    /** Timer hit zero before the player reached the exam. */
     private void timeIsUp() {
         gameOver = true;
         countdownTimer.stop();
         disableButtons();
-        riddleBox.setText("TIME'S UP! You ran out of time. Better luck next time!");
+        riddleBox.setText("TIME'S UP! You missed your exam. Better luck next time!");
         statusLabel.setText("Game over.");
-        JOptionPane.showMessageDialog(this, "Time's up! Your hour is over.");
+        JOptionPane.showMessageDialog(this, "Time's up! You missed your exam.");
     }
 
     /** Turns off every landmark button. */
@@ -264,12 +270,12 @@ public class GameWindow extends JFrame {
             g.drawString("OSU Campus Map (click where you think the riddle points!)", 10, 20);
 
             // Draw the player's marker just above their current landmark's button
-            Point p = landmarkPositions.get(logic.getCurrentLocation());
-            if (p != null) {
+            GameLogic.Landmark here = GameLogic.findLandmark(logic.getCurrentLocation());
+            if (here != null) {
                 g.setColor(Color.RED);
-                g.fillOval(p.x - 10, p.y - 52, 20, 20);
+                g.fillOval(here.x - 10, here.y - 52, 20, 20);
                 g.setColor(Color.BLACK);
-                g.drawString("YOU", p.x - 14, p.y - 58);
+                g.drawString("YOU", here.x - 14, here.y - 58);
             }
         }
     }
@@ -300,6 +306,7 @@ public class GameWindow extends JFrame {
         SwingUtilities.invokeLater(() -> {
             GameWindow window = new GameWindow(finalTeam, finalMajor);
             window.setVisible(true);
+            window.begin();   // show the story pop-up, then start the clock
         });
     }
 }
