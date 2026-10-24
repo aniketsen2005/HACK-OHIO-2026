@@ -29,19 +29,19 @@ public class LeaderboardWindow extends JFrame {
     private JButton refreshButton;
 
     public LeaderboardWindow() {
-        setTitle("OSU Scavenger Hunt - Global Leaderboard");
+        setTitle("OSU Exam Scavenger Hunt - Global Leaderboard");
         // DISPOSE_ON_CLOSE closes just this window (not the whole game)
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout());
 
         // ----- TOP: title -----
-        JLabel title = new JLabel("TOP 10 TEAMS", SwingConstants.CENTER);
+        JLabel title = new JLabel("TOP 10 PLAYERS", SwingConstants.CENTER);
         title.setFont(new Font("Arial", Font.BOLD, 24));
         title.setForeground(new Color(187, 0, 0));   // scarlet
         add(title, BorderLayout.NORTH);
 
         // ----- CENTER: the table -----
-        String[] columnNames = {"Rank", "Team", "Major", "Score"};
+        String[] columnNames = {"Rank", "Player", "Major", "Score"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
